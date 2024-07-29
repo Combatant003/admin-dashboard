@@ -44,6 +44,7 @@ app.layout = html.Div([
      Input('interval-component', 'n_intervals')]
 )
 def update_charts(selected_market_maker, n_intervals):
+    order_df = fetch_data_as_dataframe('Orders', ['order_id','bid_value', 'ask_value', 'quantity', 'created_at', 'asset'])
     filtered_df = order_df[order_df['asset'] == selected_market_maker]
     
     # Exposure chart
