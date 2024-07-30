@@ -62,7 +62,6 @@ app.layout = html.Div([
 def update_charts(selected_market_maker, n_intervals):
     order_df = fetch_data_as_dataframe('Orders', ['order_id','bid_value', 'ask_value', 'quantity', 'created_at', 'asset', 'spread'])
     filtered_df = order_df[order_df['asset'] == selected_market_maker]
-    
     # Exposure chart
     exposure_fig = px.line(filtered_df, x='created_at', y='ask_value', title='Exposure Over Time')
     
