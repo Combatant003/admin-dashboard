@@ -8,9 +8,32 @@ from dash.dependencies import Input, Output, State
 from scipy.stats import norm
 from connector import fetch_data_as_dataframe
 
-# Simulate some data
-order_df = fetch_data_as_dataframe('Orders', ['uuid', 'order_id', 'order_type', 'bid_value', 'ask_value', 'quantity', 'created_at', 'asset'])
-user_df = fetch_data_as_dataframe("USER", ['user_id', 'username'])
+# Dummy data for testing
+dummy_data = {
+    'uuid': [f'uuid{i}' for i in range(1, 11)],
+    'order_id': [f'order{i}' for i in range(1, 11)],
+    'order_type': ['buy'] * 10,
+    'bid_value': np.random.rand(10) * 100,
+    'ask_value': np.random.rand(10) * 100,
+    'quantity': [100, 10, 6, 12, 8, 15, 5, 20, 7, 14],
+    'created_at': pd.date_range(start='2024-07-30T17:16:21', periods=10, freq='h'),
+    'asset': ['AAPL'] * 10
+}
+
+dummy_user_data = {
+    'user_id': [f'order{i}' for i in range(1, 11)],
+    'username': [f'user{i}' for i in range(1, 11)]
+}
+
+order_df = pd.DataFrame(dummy_data)
+user_df = pd.DataFrame(dummy_user_data)
+
+# Fetch data from Supabase
+def fetch_data():
+    # Uncomment these lines to fetch data from Supabase
+    # order_df = fetch_data_as_dataframe('Orders', ['uuid', 'order_id', 'order_type', 'bid_value', 'ask_value', 'quantity', 'created_at', 'asset'])
+    # user_df = fetch_data_as_dataframe("USER", ['user_id', 'username'])
+    return order_df, user_df
 
 # Create a Dash app
 app = dash.Dash(__name__)
@@ -50,27 +73,29 @@ def check_threshold_exceedance(df, user_df, threshold=0.05):
     df = df.sort_values('created_at')
     
     for asset in df['asset'].unique():
-        asset_df = df[df['asset'] == asset]
-        previous_day_quantity = None
+        asset_df = df[df['asset'] == asset].copy()
+        cumulative_quantity = 0
         
         for index, row in asset_df.iterrows():
-            if previous_day_quantity is not None and row['quantity'] > previous_day_quantity * (1 + threshold):
-                user_info = user_df[user_df['user_id'] == row['order_id']].iloc[0]
-                percentage_increase = ((row['quantity'] - previous_day_quantity) / previous_day_quantity) * 100
-                log_entry = {
-                    'date': row['created_at'],
-                    'asset': row['asset'],
-                    'quantity': row['quantity'],
-                    'user_id': row['order_id'],
-                    'username': user_info['username'],
-                    'order_id': row['order_id'],
-                    'uuid': row['uuid'],
-                    'order_type': row['order_type'],
-                    'percentage_increase': percentage_increase,
-                    'message': f"Exceeds threshold: {row['quantity']} shares bought, more than 5% increase from previous day."
-                }
-                exceedance_logs.append(log_entry)
-            previous_day_quantity = row['quantity']
+            cumulative_quantity += row['quantity']
+            if row['quantity'] > cumulative_quantity * threshold:
+                user_info = user_df[user_df['user_id'] == row['order_id']]
+                if not user_info.empty:
+                    user_info = user_info.iloc[0]
+                    percentage_increase = (row['quantity'] / cumulative_quantity) * 100
+                    log_entry = {
+                        'date': row['created_at'],
+                        'asset': row['asset'],
+                        'quantity': row['quantity'],
+                        'user_id': row['order_id'],
+                        'username': user_info['username'],
+                        'order_id': row['order_id'],
+                        'uuid': row['uuid'],
+                        'order_type': row['order_type'],
+                        'percentage_increase': percentage_increase,
+                        'message': f"Exceeds threshold: {row['quantity']} shares bought, more than 5% increase of cumulative shares."
+                    }
+                    exceedance_logs.append(log_entry)
     
     return exceedance_logs
 
@@ -80,7 +105,7 @@ app.layout = html.Div([
     
     dcc.Dropdown(
         id='market-maker-dropdown',
-        options=[{'label': mm, 'value': mm} for mm in order_df['asset'].unique()],
+        options=[{'label': asset, 'value': asset} for asset in order_df['asset'].unique()],
         value=order_df['asset'].unique()[0],
         multi=False,
         style={'width': '50%'}
@@ -115,10 +140,11 @@ app.layout = html.Div([
 )
 def update_charts(selected_market_maker, n_intervals):
     try:
-        order_df = fetch_data_as_dataframe('Orders', ['uuid', 'order_id', 'order_type', 'bid_value', 'ask_value', 'quantity', 'created_at', 'asset'])
-        user_df = fetch_data_as_dataframe("USER", ['user_id', 'username'])
+        order_df, user_df = fetch_data()
+        filtered_df = order_df[order_df['asset'] == selected_market_maker].copy()
         
-        filtered_df = order_df[order_df['asset'] == selected_market_maker]
+        # Convert created_at to datetime with ISO8601 format
+        filtered_df['created_at'] = pd.to_datetime(filtered_df['created_at'], format='ISO8601')
         
         # Exposure chart
         exposure_fig = px.line(filtered_df, x='created_at', y='ask_value', title='Exposure Over Time')
@@ -139,16 +165,6 @@ def update_charts(selected_market_maker, n_intervals):
         
         # Check for threshold exceedances
         exceedance_logs = check_threshold_exceedance(order_df, user_df)
-        
-        # Dummy data to test the table layout
-        dummy_log = {
-            'uuid': '1234-5678',
-            'order_id': '1001',
-            'order_type': 'buy',
-            'quantity': 200,
-            'percentage_increase': 6.5
-        }
-        exceedance_logs.append(dummy_log)
         
         exceedance_display = [
             html.Tr([html.Td(log[col], style=styles['td']) for col in ['uuid', 'order_id', 'order_type', 'quantity', 'percentage_increase']], style=styles['tr:nth-child(even)'])
